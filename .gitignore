@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local logs
+disaster-ai/data/notification_logs.jsonl

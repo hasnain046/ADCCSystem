@@ -1,11 +1,28 @@
-# Placeholder for requirements.txt# AI & Agents
+# AI & Agents
 langchain
 langgraph
 langchain-google-genai
 google-generativeai
 
-# Frontend
-streamlit
+# FastAPI Backend
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Database
+sqlalchemy
+psycopg2-binary
+alembic
+
+# Data Validation
+pydantic
+pydantic-settings
+
+# Environment Variables
+python-dotenv
+
+# Logging
+loguru
 
 # HTTP Requests
 requests
@@ -19,9 +36,8 @@ newspaper3k
 # Search
 tavily-python
 
-# Database
-sqlalchemy
-psycopg2-binary
+# Frontend (Streamlit)
+streamlit
 
 # Vector DB
 chromadb
@@ -37,23 +53,15 @@ apscheduler
 folium
 streamlit-folium
 
-# Environment Variables
-python-dotenv
-
-# Validation
-pydantic
-
 # Notifications
 twilio
 
-# Logging
-loguru
+# Testing
+pytest
+httpx
 
 # Utilities
 python-dateutil
 
 # APIs
 newsapi-python
-
-# Testing
-pytest
