@@ -107,12 +107,29 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Test DB connection on app startup."""
+    """Test DB connection on app startup, ensure tables exist, and seed database if empty."""
     logger.info("🚀 ADCC API starting up...")
-    if test_connection():
-        logger.info("✅ PostgreSQL connected successfully")
+    
+    # Check connection
+    db_connected = test_connection()
+    if db_connected:
+        logger.info("✅ Database connection successful")
     else:
-        logger.error("❌ PostgreSQL connection FAILED — check DATABASE_URL in .env")
+        logger.warning("⚠️ Main database connection failed. Falling back to SQLite.")
+
+    # Create tables and auto-seed if needed
+    try:
+        from database.postgres import create_tables
+        from database.seed_data import seed_all
+        
+        # Ensure tables exist
+        create_tables()
+        
+        # Run seed_all (checks internally if data already exists, safe to call)
+        seed_all(reset=False)
+        logger.info("✅ Database tables verified and auto-seeding completed.")
+    except Exception as e:
+        logger.error(f"❌ Error during startup database initialization: {e}")
 
 
 # ===========================================================================

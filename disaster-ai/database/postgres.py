@@ -37,24 +37,49 @@ DATABASE_URL: str = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
-# SQLAlchemy Engine
-# pool_pre_ping=True  → test connection before use (avoids stale connections)
-# pool_size=10        → max persistent connections
-# max_overflow=20     → extra connections beyond pool_size when under load
-# echo=False          → set True for SQL query logging in development
+# SQLite Fallback Detection
 # ---------------------------------------------------------------------------
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-)
+USE_SQLITE = False
+SQLITE_DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "adcc_local.db"))
+SQLITE_URL = f"sqlite:///{SQLITE_DB_PATH}"
+
+# Test PostgreSQL connection first
+try:
+    if "sqlite" in DATABASE_URL.lower():
+        USE_SQLITE = True
+    else:
+        # Create a temp engine to test connection with a short timeout
+        temp_engine = create_engine(DATABASE_URL, connect_args={"connect_timeout": 2} if "postgresql" in DATABASE_URL else {})
+        with temp_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        temp_engine.dispose()
+except Exception as e:
+    logger.warning(f"⚠️ PostgreSQL connection test failed: {e}. Falling back to local SQLite database: {SQLITE_URL}")
+    USE_SQLITE = True
+
+# ---------------------------------------------------------------------------
+# SQLAlchemy Engine Creation
+# ---------------------------------------------------------------------------
+if USE_SQLITE:
+    # Ensure data folder exists
+    os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
+    DATABASE_URL = SQLITE_URL
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    )
 
 # ---------------------------------------------------------------------------
 # Session Factory
-# autocommit=False → manual transaction control
-# autoflush=False  → explicit flush before queries
 # ---------------------------------------------------------------------------
 SessionLocal = sessionmaker(
     autocommit=False,
