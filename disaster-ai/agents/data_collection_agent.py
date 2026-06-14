@@ -612,6 +612,13 @@ def collect_all_data(
     # Mark agent start in metadata
     state = update_state_metadata(state, current_node=AGENT_NAME)
 
+    if state.get("is_demo"):
+        logger.info("[DataAgent] 🚀 Demo Mode Active. Injecting pre-seeded scenario state.")
+        state = update_state_metadata(state, current_node=AGENT_NAME, data_source="Demo Telemetry")
+        if not skip_resources:
+            state = collect_resource_data(state, latitude=latitude, longitude=longitude, radius_km=resource_radius_km)
+        return state
+
     # ── 1. Weather ────────────────────────────────────────────────────────────
     if not skip_weather:
         logger.info("[DataAgent] Step 1/4 → Weather data")

@@ -56,6 +56,7 @@ from loguru import logger
 
 from services.confidence_engine import (
     ConfidenceReport,
+    ComponentScore,
     generate_confidence_report,
 )
 from tools.news_tool import NewsArticle, NewsResponse, get_news_by_keyword
@@ -229,15 +230,37 @@ def verify_gdacs_events(state: DisasterState) -> tuple[DisasterState, list[Confi
 
         t = time.monotonic()
         try:
-            report = _verify_single_event(
-                event_type=event_type,
-                event_title=event_title,
-                country=country,
-                location_label=location,
-                gdacs_events=gdacs_events,
-                weather_data=weather_data,
-                earthquake_events=earthquake_events,
-            )
+            if event.get("source") == "DEMO" or state.get("is_demo"):
+                report = ConfidenceReport(
+                    event_type=event_type,
+                    event_title=event_title,
+                    country=country,
+                    location=event_title,
+                    confidence_score=95.0,
+                    verification_status="Verified",
+                    sources_confirmed=["GDACS", "Weather"],
+                    sources_checked=["GDACS", "Weather", "Simulated News"],
+                    component_scores=[
+                        ComponentScore(
+                            component="GDACS",
+                            max_points=40,
+                            earned_points=40,
+                            match_level="Full",
+                            reason="[DEMO] Simulated event match"
+                        )
+                    ],
+                    summary=f"[DEMO] Automatically verified simulated event: {event_title}."
+                )
+            else:
+                report = _verify_single_event(
+                    event_type=event_type,
+                    event_title=event_title,
+                    country=country,
+                    location_label=location,
+                    gdacs_events=gdacs_events,
+                    weather_data=weather_data,
+                    earthquake_events=earthquake_events,
+                )
             reports.append(report)
             elapsed = round(time.monotonic() - t, 2)
 
@@ -293,15 +316,37 @@ def verify_earthquake_events(state: DisasterState) -> tuple[DisasterState, list[
 
         t = time.monotonic()
         try:
-            report = _verify_single_event(
-                event_type="Earthquake",
-                event_title=title,
-                country=country,
-                location_label=place,
-                gdacs_events=gdacs_events,
-                weather_data=weather_data,
-                earthquake_events=eq_events,
-            )
+            if eq.get("source") == "DEMO" or state.get("is_demo"):
+                report = ConfidenceReport(
+                    event_type="Earthquake",
+                    event_title=title,
+                    country=country,
+                    location=place,
+                    confidence_score=95.0,
+                    verification_status="Verified",
+                    sources_confirmed=["USGS", "Weather"],
+                    sources_checked=["USGS", "Weather", "Simulated News"],
+                    component_scores=[
+                        ComponentScore(
+                            component="GDACS",
+                            max_points=40,
+                            earned_points=40,
+                            match_level="Full",
+                            reason="[DEMO] Simulated earthquake match"
+                        )
+                    ],
+                    summary=f"[DEMO] Automatically verified simulated earthquake: {title}."
+                )
+            else:
+                report = _verify_single_event(
+                    event_type="Earthquake",
+                    event_title=title,
+                    country=country,
+                    location_label=place,
+                    gdacs_events=gdacs_events,
+                    weather_data=weather_data,
+                    earthquake_events=eq_events,
+                )
             reports.append(report)
             elapsed = round(time.monotonic() - t, 2)
 
@@ -434,9 +479,9 @@ def run_verification(state: DisasterState) -> DisasterState:
 
     # Check data availability
     if not state.get("disaster_events") and not state.get("earthquake_events"):
-        msg = "No disaster or earthquake events in state — run data_collection_agent first"
-        logger.error(f"[VerificationAgent] ❌ {msg}")
-        state = update_state_metadata(state, current_node=AGENT_NAME, error=msg)
+        msg = "No active disasters detected. System operating in nominal mode."
+        logger.info(f"[VerificationAgent] {msg}")
+        state = update_state_metadata(state, current_node=AGENT_NAME)
         return state
 
     all_reports: list[ConfidenceReport] = []

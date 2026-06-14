@@ -360,8 +360,16 @@ export const AICommandCenter: React.FC = () => {
                   
                   <div className="space-y-3 font-mono text-xs">
                     {verReports.length === 0 ? (
-                      <div className="p-3 bg-adcc-warning/5 border border-adcc-warning/20 rounded text-adcc-warning">
-                        VERIFICATION LOG EMPTY: Input coordinate event not found in global alert logs. Safe meteorological warning initialized.
+                      <div className="p-4 bg-cyan-950/15 border border-cyan-500/30 rounded-lg text-cyan-400 flex flex-col gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.03)]">
+                        <div className="flex items-center gap-2 font-bold text-xs">
+                          <CheckCircle size={14} className="text-cyan-400 animate-pulse" />
+                          <span>NO ACTIVE DISASTERS DETECTED</span>
+                        </div>
+                        <div className="text-[11px] leading-relaxed text-gray-400 font-sans">
+                          All monitored feeds are operational.<br />
+                          No verified threats were found near the selected coordinates.<br />
+                          System is operating in nominal monitoring mode.
+                        </div>
                       </div>
                     ) : (
                       verReports.map((rep: any, idx: number) => (

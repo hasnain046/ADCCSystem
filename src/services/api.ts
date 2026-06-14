@@ -143,6 +143,16 @@ export interface OrchestrationResult {
   state: any;
 }
 
+export interface DemoRunResult {
+  verified_reports: any[];
+  severity_score: number;
+  allocation_plan: any;
+  shelter_plan: any;
+  replanning_actions: any[];
+  node_trace: string[];
+  disasters_created: string[];
+}
+
 // API Service Methods
 export const apiService = {
   // Health
@@ -248,6 +258,15 @@ export const apiService = {
     country: string;
   }): Promise<OrchestrationResult> => {
     const { data } = await api.post<OrchestrationResult>('/api/orchestration/run', payload);
+    return data;
+  },
+
+  // Demo Mode Pipeline
+  runDemoScenario: async (payload: {
+    scenario: 'Mumbai Flood' | 'Gujarat Cyclone' | 'Kashmir Earthquake';
+    severity?: string;
+  }): Promise<DemoRunResult> => {
+    const { data } = await api.post<DemoRunResult>('/api/demo/run', payload);
     return data;
   },
 

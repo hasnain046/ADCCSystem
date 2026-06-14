@@ -459,6 +459,15 @@ export const DisasterMap: React.FC = () => {
           {/* Map Top Bar (Filters & Layers) */}
           <div className="p-3 border-b border-gray-800 bg-adcc-secondary flex flex-wrap items-center justify-between gap-3 z-[1001]">
             <div className="flex items-center gap-2 text-xs font-mono">
+              {disasters.some(d => d.source === 'DEMO') && (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 rounded text-amber-500 font-mono text-[10px] font-bold tracking-wider mr-2">
+                  <span className="flex h-1.5 w-1.5 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                  </span>
+                  DEMO MODE ACTIVE
+                </div>
+              )}
               <Filter size={14} className="text-adcc-accent" />
               <select
                 value={filterType}

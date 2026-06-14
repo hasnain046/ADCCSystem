@@ -1060,36 +1060,25 @@ def run_orchestration_workflow(payload: WorkflowRunPayload, db: Session = Depend
         verified_reports = final_state.get("verified_reports") or []
         created_disasters = []
         
-        # If no verified reports were found, let's create a single disaster based on weather flood risk or alerts to show data
-        # this ensures we always have a disaster record when the pipeline runs.
+        # If no verified reports were found, return nominal monitoring state
         if not verified_reports:
-            weather = final_state.get("weather_data") or {}
-            is_flood = weather.get("flood_risk", False) or weather.get("rainfall_mm", 0.0) >= 50.0
-            
-            disaster_title = f"{payload.location_label} Inundation Warning" if is_flood else f"{payload.location_label} Meteorological Event"
-            d_type = DisasterType.FLOOD if is_flood else DisasterType.CYCLONE
-            
-            # Check if exists
-            existing = db.query(Disaster).filter(Disaster.title == disaster_title).first()
-            if not existing:
-                disaster = Disaster(
-                    title=disaster_title,
-                    disaster_type=d_type,
-                    severity=SeverityLevel(final_state.get("severity_level", "Low")),
-                    status=DisasterStatus.ACTIVE,
-                    latitude=payload.latitude,
-                    longitude=payload.longitude,
-                    affected_population=1000 if is_flood else 0,
-                    confidence_score=final_state.get("confidence_score", 0.1),
-                    verification_status=VerificationStatus.VERIFIED if is_flood else VerificationStatus.UNVERIFIED,
-                    source="Open-Meteo",
-                    source_type=SourceType.OPENMETEO
-                )
-                db.add(disaster)
-                db.commit()
-                db.refresh(disaster)
-                existing = disaster
-            created_disasters.append(existing)
+            return {
+                "system_state": "nominal",
+                "confidence_score": 0,
+                "severity_level": "LOW",
+                "verification_status": "NO_ACTIVE_DISASTER",
+                "status": "success",
+                "severity": "Low",
+                "confidence": 0,
+                "resources_allocated": False,
+                "shelters_assigned": False,
+                "session_id": final_state.get("session_id"),
+                "disasters_created": [],
+                "replanning_actions": [],
+                "recommendations": ["System is operating in nominal monitoring mode."],
+                "node_trace": final_state.get("metadata", {}).get("nodes_visited", []),
+                "state": final_state
+            }
         else:
             for rep in verified_reports:
                 title = rep.get("disaster_title")
@@ -1216,6 +1205,253 @@ def run_orchestration_workflow(payload: WorkflowRunPayload, db: Session = Depend
     except Exception as e:
         db.rollback()
         logger.error(f"❌ Error during orchestration execution endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DemoRunPayload(BaseModel):
+    scenario: str = Field(..., description="Supported scenarios: 'Mumbai Flood', 'Gujarat Cyclone', 'Kashmir Earthquake'")
+    severity: Optional[str] = Field(None, description="Optional severity override")
+
+
+@app.post("/api/demo/run", tags=["Demo"])
+def run_demo_scenario(payload: DemoRunPayload, db: Session = Depends(get_db)):
+    """
+    Triggers the complete LangGraph ADCC orchestration pipeline in Demo Mode.
+    Injects pre-seeded scenario state, bypassing live API calls and scraping.
+    Persists resulting events (marked with source='DEMO'), allocations, and shelter assignments.
+    """
+    from services.demo_helper import get_demo_scenario
+    from datetime import datetime, timezone
+    
+    scenario = get_demo_scenario(payload.scenario)
+    if not scenario:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scenario '{payload.scenario}' not supported. Choose one of: 'Mumbai Flood', 'Gujarat Cyclone', 'Kashmir Earthquake'."
+        )
+    
+    logger.info(f"🎭 Triggering Demo Scenario: {payload.scenario}")
+    try:
+        from workflows.graph import run_graph
+        
+        # 1. Construct weather state
+        weather_info = scenario["weather"]
+        weather_state = {
+            "latitude": scenario["latitude"],
+            "longitude": scenario["longitude"],
+            "location_label": scenario["title"],
+            "temperature_c": weather_info["temperature_c"],
+            "rainfall_mm": weather_info["rainfall_mm"],
+            "humidity_percent": weather_info["humidity_percent"],
+            "wind_speed_kmh": weather_info["wind_speed_kmh"],
+            "wind_direction_deg": 0.0,
+            "weather_description": weather_info["weather_description"],
+            "is_day": True,
+            "flood_risk": weather_info["flood_risk"],
+            "cyclone_risk": weather_info["cyclone_risk"],
+            "forecast_days": 7,
+            "max_rainfall_mm": weather_info["rainfall_mm"] * 1.5,
+            "max_wind_kmh": weather_info["wind_speed_kmh"] * 1.1,
+            "flood_risk_hours": 12 if weather_info["flood_risk"] else 0,
+            "risk_summary": f"Simulated demo risk for {payload.scenario}.",
+            "source": "Open-Meteo",
+            "source_url": "https://open-meteo.com",
+            "fetched_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # 2. Construct events
+        disaster_events = []
+        earthquake_events = []
+        
+        if scenario["disaster_type"] == "Earthquake":
+            eq_info = scenario["earthquake"]
+            eq_event = {
+                "usgs_id": "demo-kashmir-eq",
+                "usgs_url": "https://earthquake.usgs.gov",
+                "magnitude": eq_info["magnitude"],
+                "magnitude_type": "Mw",
+                "depth_km": eq_info["depth_km"],
+                "depth_label": eq_info["depth_label"],
+                "latitude": scenario["latitude"],
+                "longitude": scenario["longitude"],
+                "place": eq_info["place"],
+                "country": "India",
+                "severity_mapped": payload.severity or scenario["default_severity"],
+                "event_time": datetime.now(timezone.utc).isoformat(),
+                "event_time_ist": datetime.now(timezone.utc).isoformat(),
+                "felt_reports": 850,
+                "tsunami_risk": False,
+                "alert_level": "red",
+                "significance": 1000,
+                "source": "DEMO",
+                "source_url": "https://earthquake.usgs.gov"
+            }
+            earthquake_events.append(eq_event)
+        else:
+            # Flood or Cyclone
+            event_type_map = {"Flood": "FL", "Cyclone": "TC"}
+            g_event = {
+                "event_id": f"demo-{scenario['disaster_type'].lower()}",
+                "event_type": event_type_map.get(scenario["disaster_type"], "FL"),
+                "event_type_label": scenario["disaster_type"],
+                "alert_level": "Red",
+                "severity_mapped": payload.severity or scenario["default_severity"],
+                "alert_score": 3.5,
+                "country": "India",
+                "latitude": scenario["latitude"],
+                "longitude": scenario["longitude"],
+                "title": scenario["title"],
+                "description": weather_info["weather_description"],
+                "url": "https://www.gdacs.org",
+                "affected_population": scenario["affected_population"],
+                "event_date": datetime.now(timezone.utc).isoformat(),
+                "source": "DEMO",
+                "source_url": "https://www.gdacs.org"
+            }
+            disaster_events.append(g_event)
+            
+        # Build initial state dict
+        initial_state = {
+            "is_demo": True,
+            "latitude": scenario["latitude"],
+            "longitude": scenario["longitude"],
+            "location_label": scenario["title"],
+            "country": "India",
+            "weather_data": weather_state,
+            "disaster_events": disaster_events,
+            "earthquake_events": earthquake_events,
+        }
+        
+        # Run graph
+        result = run_graph(initial_state)
+        
+        if result.get("status") != "success":
+            raise HTTPException(status_code=500, detail=f"Demo Orchestration failure: {result.get('error_message')}")
+            
+        final_state = result["state"]
+        
+        # 1. Persist verified reports as disasters (marked with source="DEMO")
+        verified_reports = final_state.get("verified_reports") or []
+        created_disasters = []
+        
+        if not verified_reports:
+            # Fallback in case of verification discrepancy
+            disaster = Disaster(
+                title=scenario["title"],
+                disaster_type=DisasterType(scenario["disaster_type"]),
+                severity=SeverityLevel(final_state.get("severity_level", scenario["default_severity"])),
+                status=DisasterStatus.ACTIVE,
+                latitude=scenario["latitude"],
+                longitude=scenario["longitude"],
+                affected_population=scenario["affected_population"],
+                confidence_score=scenario["confidence_score"],
+                verification_status=VerificationStatus.VERIFIED,
+                source="DEMO",
+                source_type=SourceType.MANUAL
+            )
+            db.add(disaster)
+            db.commit()
+            db.refresh(disaster)
+            created_disasters.append(disaster)
+        else:
+            for rep in verified_reports:
+                title = rep.get("disaster_title")
+                existing = db.query(Disaster).filter(Disaster.title == title, Disaster.source == "DEMO").first()
+                if not existing:
+                    disaster = Disaster(
+                        title=title,
+                        disaster_type=DisasterType(scenario["disaster_type"]),
+                        severity=SeverityLevel(final_state.get("severity_level", scenario["default_severity"])),
+                        status=DisasterStatus.ACTIVE,
+                        latitude=scenario["latitude"],
+                        longitude=scenario["longitude"],
+                        affected_population=scenario["affected_population"],
+                        confidence_score=rep.get("consensus_confidence", 0.95),
+                        verification_status=VerificationStatus.VERIFIED,
+                        source="DEMO",
+                        source_type=SourceType.MANUAL
+                    )
+                    db.add(disaster)
+                    db.commit()
+                    db.refresh(disaster)
+                    existing = disaster
+                created_disasters.append(existing)
+                
+                # Create verification log
+                for src in rep.get("sources_checked") or []:
+                    log_exists = db.query(VerificationLog).filter(
+                        VerificationLog.disaster_id == existing.id,
+                        VerificationLog.source_checked == src
+                    ).first()
+                    if not log_exists:
+                        v_log = VerificationLog(
+                            disaster_id=existing.id,
+                            source_checked=src,
+                            result=rep.get("verification_result", "Verified"),
+                            confidence=rep.get("consensus_confidence", 0.95),
+                            notes=rep.get("verification_notes", "Demo pipeline run verification")
+                        )
+                        db.add(v_log)
+                        
+        # 2. Persist resource allocations
+        alloc_plan = final_state.get("allocation_plan") or {}
+        allocations_list = alloc_plan.get("allocations") or []
+        primary_disaster = created_disasters[0] if created_disasters else None
+        
+        if primary_disaster and allocations_list:
+            for alloc in allocations_list:
+                res_id_str = alloc.get("resource_id")
+                try:
+                    res_id = uuid.UUID(res_id_str)
+                    db_res = db.query(Resource).filter(Resource.id == res_id).first()
+                    if db_res:
+                        existing_alloc = db.query(ResourceAllocation).filter(
+                            ResourceAllocation.disaster_id == primary_disaster.id,
+                            ResourceAllocation.resource_id == res_id
+                        ).first()
+                        
+                        if not existing_alloc:
+                            allocation_record = ResourceAllocation(
+                                disaster_id=primary_disaster.id,
+                                resource_id=res_id,
+                                quantity=alloc.get("quantity", 1),
+                                allocation_reason=alloc.get("reason", "Demo Pipeline allocated"),
+                                status=AllocationStatus.ACTIVE
+                            )
+                            db.add(allocation_record)
+                            db_res.status = ResourceStatus.BUSY
+                except Exception as ex:
+                    logger.warning(f"Could not persist allocation for resource {res_id_str}: {ex}")
+                    
+        # 3. Persist shelter assignments
+        shelter_plan = final_state.get("shelter_plan") or {}
+        assigned_shelters = shelter_plan.get("assigned_shelters") or []
+        if assigned_shelters:
+            for ash in assigned_shelters:
+                sh_id_str = ash.get("shelter_id")
+                if sh_id_str != "temp-camp-delta":
+                    try:
+                        sh_id = uuid.UUID(sh_id_str)
+                        db_shelter = db.query(Shelter).filter(Shelter.id == sh_id).first()
+                        if db_shelter:
+                            db_shelter.occupied = min(db_shelter.capacity, db_shelter.occupied + ash.get("assigned_people", 0))
+                    except Exception as ex:
+                        logger.warning(f"Could not update occupancy for shelter {sh_id_str}: {ex}")
+                        
+        db.commit()
+        
+        return {
+            "verified_reports": final_state.get("verified_reports", []),
+            "severity_score": final_state.get("severity_score", 0.0),
+            "allocation_plan": final_state.get("allocation_plan"),
+            "shelter_plan": final_state.get("shelter_plan"),
+            "replanning_actions": final_state.get("replanning_actions", []),
+            "node_trace": final_state.get("metadata", {}).get("nodes_visited", []),
+            "disasters_created": [str(d.id) for d in created_disasters]
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error during demo orchestration execution: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

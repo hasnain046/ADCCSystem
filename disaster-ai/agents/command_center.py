@@ -163,14 +163,34 @@ def generate_mock_response(query: str, db: Session) -> str:
 
     query_l = query.lower()
 
-    if "happen" in query_l or "situation" in query_l or "mumbai" in query_l or "guwahati" in query_l or "pune" in query_l:
+    # Calculate actual buffer stock counts from database dynamically
+    resources = db.query(Resource).all()
+    total_resources_count = len(resources)
+    available_resources_count = sum(r.quantity for r in resources if r.status == ResourceStatus.AVAILABLE)
+    
+    boats_total = sum(r.quantity for r in resources if r.resource_type == ResourceType.BOAT)
+    boats_busy = sum(r.quantity for r in resources if r.resource_type == ResourceType.BOAT and r.status == ResourceStatus.BUSY)
+    boats_avail = max(0, boats_total - boats_busy)
+    boats_pct = int(round((boats_busy / max(1, boats_total)) * 100)) if boats_total > 0 else 0
+    
+    amb_total = sum(r.quantity for r in resources if r.resource_type == ResourceType.AMBULANCE)
+    amb_busy = sum(r.quantity for r in resources if r.resource_type == ResourceType.AMBULANCE and r.status == ResourceStatus.BUSY)
+    amb_avail = max(0, amb_total - amb_busy)
+    amb_pct = int(round((amb_busy / max(1, amb_total)) * 100)) if amb_total > 0 else 0
+    
+    ndrf_total = sum(r.quantity for r in resources if r.resource_type == ResourceType.NDRF_UNIT)
+    ndrf_busy = sum(r.quantity for r in resources if r.resource_type == ResourceType.NDRF_UNIT and r.status == ResourceStatus.BUSY)
+    ndrf_avail = max(0, ndrf_total - ndrf_busy)
+    ndrf_pct = int(round((ndrf_busy / max(1, ndrf_total)) * 100)) if ndrf_total > 0 else 0
+
+    if "happen" in query_l or "situation" in query_l or "monitoring" in query_l:
         # Situation Summary
         if not disasters:
             return (
                 "### 🛰️ ADCC STATUS REPORT: SYSTEM NOMINAL\n\n"
                 "> **Alert Level:** GREEN (No active outbreaks)\n\n"
                 "* **Status:** Satellite networks and seismometer lines are normal.\n"
-                "* **Depots:** Relief buffers are at 100% capacity.\n"
+                "* **Depots:** Central logistics depots report full readiness.\n"
                 "* **Recommendation:** Standby mode active. Continuous meteorological feed listening."
             )
         
@@ -179,6 +199,7 @@ def generate_mock_response(query: str, db: Session) -> str:
             d_summaries.append(
                 f"* **{d.title}** ({d.disaster_type.value})\n"
                 f"  * **Severity:** `{d.severity.value}` | **Evacuees:** {d.affected_population or 0}\n"
+                f"  * **Location:** ({d.latitude:.4f}, {d.longitude:.4f})\n"
                 f"  * **Verification:** {d.verification_status.value} (Confidence: {int((d.confidence_score or 0) * 100)}%)"
             )
         d_list = "\n".join(d_summaries)
@@ -188,7 +209,7 @@ def generate_mock_response(query: str, db: Session) -> str:
             f"Currently monitoring **{len(disasters)} active hazard sectors**:\n\n"
             f"{d_list}\n\n"
             "#### 📋 Active Allocations\n"
-            f"A total of **{len(allocs)} response deployments** are active. Teams are dispatched to flood zones and seismic epicenters. Evacuation corridors are established."
+            f"A total of **{len(allocs)} response deployments** are active. Relief corridors are established."
         )
 
     elif "severity" in query_l or "critical" in query_l or "why" in query_l:
@@ -200,23 +221,31 @@ def generate_mock_response(query: str, db: Session) -> str:
         return (
             f"### ⚖️ SEVERITY DIAGNOSTICS: {d.title.upper()}\n\n"
             f"* **Current Severity Rating:** `{d.severity.value}`\n"
-            f"* **Confidence Consensus Score:** `{int((d.confidence_score or 0.1) * 100)}%` (Verified)\n\n"
+            f"* **Confidence Consensus Score:** `{int((d.confidence_score or 0.1) * 100)}%` ({d.verification_status.value})\n\n"
             "#### 🔍 Key Stress Factors:\n"
-            f"1. **Population Density Exposure:** ~{d.affected_population or 1000} citizens located in the warning grid.\n"
-            "2. **Weather Indicators:** Rainfall / storm grids exceed standard safety thresholds.\n"
-            "3. **Depot Strain:** Emergency logistics buffer is actively deploying units.\n\n"
-            "> **Assessment:** Pipeline nodes completed checking USGS and GDACS RSS. Severity confirmed."
+            f"1. **Population Exposure:** ~{d.affected_population or 1000} citizens located in the warning grid.\n"
+            f"2. **Weather Risk:** Rainfall/wind parameters evaluated for coordinates ({d.latitude:.4f}, {d.longitude:.4f}).\n"
+            f"3. **Depot Strain:** Responders central depots are active. Available logistics buffer: {available_resources_count} units.\n\n"
+            f"> **Assessment:** Verification agent verified event details from live sources. Severity category validated as {d.severity.value}."
         )
 
     elif "resource" in query_l or "allocat" in query_l or "deploy" in query_l:
         # Explain Allocations
         if not allocs:
-            return "### 🚁 LOGISTICS REGISTRY: STANDBY\nNo resources have been deployed yet. Central depots report full relief buffer readiness."
+            return (
+                "### 🚁 LOGISTICS REGISTRY: STANDBY\n\n"
+                "No resources have been deployed yet. Central depots report full relief buffer readiness.\n\n"
+                f"#### Central Depot Availability:\n"
+                f"* Boats: {boats_avail} available\n"
+                f"* NDRF Units: {ndrf_avail} available\n"
+                f"* Ambulances: {amb_avail} available"
+            )
         
         alloc_list = []
         for a in allocs:
             res_name = a.resource.resource_name if a.resource else "Rescue Unit"
-            alloc_list.append(f"* **{a.quantity}x {res_name}** deployed for {a.disaster.title} (Reason: *{a.allocation_reason or 'Command override'}*)")
+            dest = a.disaster.title if a.disaster else "Disaster Zone"
+            alloc_list.append(f"* **{a.quantity}x {res_name}** deployed to {dest} (Reason: *{a.allocation_reason or 'Command override'}*)")
         alloc_text = "\n".join(alloc_list)
         
         return (
@@ -224,9 +253,9 @@ def generate_mock_response(query: str, db: Session) -> str:
             f"Central command registers **{len(allocs)} active relief allocations**:\n\n"
             f"{alloc_text}\n\n"
             "#### 📦 Buffer Stock Check:\n"
-            "* Boats: 85% occupied\n"
-            "* NDRF Battalions: Active deployment in progress\n"
-            "* Ambulances: Sector reserves operational"
+            f"* Boats: {boats_pct}% occupied ({boats_avail}/{boats_total} available)\n"
+            f"* NDRF Units: {ndrf_pct}% occupied ({ndrf_avail}/{ndrf_total} available)\n"
+            f"* Ambulances: {amb_pct}% occupied ({amb_avail}/{amb_total} available)"
         )
 
     elif "shelter" in query_l or "evacuat" in query_l or "capacity" in query_l:
@@ -236,40 +265,91 @@ def generate_mock_response(query: str, db: Session) -> str:
         for s in occupied_shelters:
             occupancy = (s.occupied / max(1, s.capacity)) * 100
             shelter_list.append(f"* **{s.name}** ({s.city}): `{s.occupied}/{s.capacity}` occupied ({occupancy:.1f}%)")
-        shelter_text = "\n".join(shelter_list) if shelter_list else "* All shelters are currently vacant."
+        shelter_text = "\n".join(shelter_list) if shelter_list else "* All registered shelters are currently vacant."
+        
+        total_slots = sum(s.capacity for s in shelters)
+        occupied_slots = sum(s.occupied for s in shelters)
+        vacant_slots = max(0, total_slots - occupied_slots)
         
         return (
             "### ⛺ EMERGENCY SHELTERS & EVACUATION SUMMARY\n\n"
-            f"Command tracks shelter utilization metrics across the grids:\n\n"
+            f"Command tracks shelter utilization metrics across active regions. Total vacant capacity: {vacant_slots} slots.\n\n"
             f"{shelter_text}\n\n"
-            "#### ⚠️ Evacuation Risk Warning:\n"
-            "> **Status:** Evacuation routing grids are active. Evacuee assignments are calculated nearest-first. No critical capacity overflows logged."
+            "#### 📡 Evacuation Routing:\n"
+            "> Evacuation routes are computed using nearest-first greedy matching. Emergency transport standby active."
         )
 
     elif "do next" in query_l or "recommend" in query_l or "action" in query_l:
         # Action Recommendations
+        if not disasters:
+            return (
+                "### 📋 ADCC TACTICAL ACTION PROTOCOLS\n\n"
+                "System is nominal. No urgent disaster response operations are active.\n"
+                "1. **Monitor feeds:** Maintain satellite and weather telemetry polling.\n"
+                "2. **Depot maintenance:** Check responder status flags."
+            )
+        
+        d = disasters[0]
+        recs = []
+        if d.disaster_type.value == "Flood":
+            recs = [
+                f"1. **🚨 Evacuate Low-Lying Grids:** Alert vulnerable populations in the {d.title} sector.",
+                "2. **🚁 Water Rescue Dispatch:** Mobilize rubber boats and NDRF battalions.",
+                "3. **⛺ Overflow Shelters:** Prepare temporary camps in safe surrounding locations."
+            ]
+        elif d.disaster_type.value == "Earthquake":
+            recs = [
+                f"1. **🚨 Search and Rescue:** Dispatch heavy rescue teams and dog squads to {d.title}.",
+                "2. **🏥 Trauma Standby:** Alert closest hospital networks to clear beds.",
+                "3. **⛺ Open Relief Centers:** Activate emergency camps to house displaced citizens."
+            ]
+        elif d.disaster_type.value == "Cyclone":
+            recs = [
+                f"1. **🚨 Storm Surge Warnings:** Broadcast warnings to coastal fishing hamlets.",
+                "2. **⛺ Evacuate to Cyclone Shelters:** Assist residents in shifting to reinforced structures.",
+                "3. **📦 Deploy Power & Comm Reserves:** Position emergency backup towers."
+            ]
+        else:
+            recs = [
+                f"1. **🚨 Deploy Responders:** Dispatch nearest available resources to {d.title}.",
+                "2. **⛺ Shelter Management:** Route affected population to closest vacancies.",
+                "3. **📡 Satellite Analysis:** Request high-resolution imagery passes."
+            ]
+            
+        recs_text = "\n".join(recs)
         return (
             "### 📋 ADCC TACTICAL ACTION PROTOCOLS\n\n"
-            "Based on multi-agent severity logs, the following operations are recommended:\n\n"
-            "1. **🚨 Evacuate Low-Lying Sectors:** Set alert sirens in active storm surge grids.\n"
-            "2. **🚁 Logistics Dispatch:** Release additional inflatable boats and emergency medical tents from Depot reserves.\n"
-            "3. **🏥 Bed Allocations:** Sync hospital networks in Pune and Guwahati for trauma standby.\n"
-            "4. **📡 Satellite Verification:** Schedule Sentinel-2 high-res radar passes over grid boundaries."
+            "Based on multi-agent logs, the following operations are recommended:\n\n"
+            f"{recs_text}\n\n"
+            "> **Notification:** Status escalated to active response mode. Continuous tracking active."
         )
 
-    elif "simulation" in query_l or "rainfall increases" in query_l or "30%" in query_l:
+    elif "simulation" in query_l or "predicted" in query_l:
         # Simulation Summary
         if not sims:
-            return "### 🔮 DIGITAL TWIN: IDLE\nNo simulations recorded. Adjust configurator dials to check scenario outcomes."
+            return "### 🔮 DIGITAL TWIN: IDLE\nNo simulations recorded in the database history."
         
         s = sims[0]
+        
+        deficit_text = "No resource deficit identified."
+        if s.result_summary:
+            try:
+                sim_data = json.loads(s.result_summary)
+                gaps = sim_data.get("resource_metrics", {}).get("gap", {})
+                active_gaps = [f"{g_qty} {g_type}" for g_type, g_qty in gaps.items() if g_qty > 0]
+                if active_gaps:
+                    deficit_text = f"Projected resource deficit: **{', '.join(active_gaps)}**."
+            except Exception:
+                if "deficit" in s.result_summary.lower():
+                    deficit_text = s.result_summary
+        
         return (
             f"### 🔮 DIGITAL TWIN WHAT-IF ASSESSMENT: {s.scenario_name}\n\n"
-            f"* **Inputs Applied:** Rainfall change {s.rainfall_change or 0}%, Wind/Seismic={s.wind_speed_change or 0}%\n"
+            f"* **Inputs Applied:** Rainfall={s.rainfall_change or 0}mm, Wind/Seismic={s.wind_speed_change or 0}km/h, Pop={s.population_change or 0}\n"
             f"* **Predicted Severity Outcome:** `{s.predicted_severity.value if s.predicted_severity else 'High'}`\n\n"
-            "#### 📉 Logistics Outbreak Gaps:\n"
-            "* **Shelter Capacity:** Capacity shrinks by 10%. Evacuation corridors warn of localized overflows.\n"
-            "* **Depot Reserves:** Projected resource deficit is **2 Boats and 1 Ambulance** if indicators scale further."
+            "#### 📉 Outbreak Gaps:\n"
+            f"* **Shelter Corridors:** Evacuation routing warning thresholds active.\n"
+            f"* **Depot Reserves:** {deficit_text}"
         )
 
     # General fallback
@@ -277,7 +357,7 @@ def generate_mock_response(query: str, db: Session) -> str:
         "### 🛰️ COMMAND CENTER COGNITIVE LINK OPERATIONAL\n\n"
         f"I have parsed your query: *\"{query}\"*.\n\n"
         "Please ask specific questions about:\n"
-        "1. Active disaster landscape (\"What is happening in Guwahati?\")\n"
+        "1. Active disaster landscape (\"What is happening in the active sector?\")\n"
         "2. Resource allocations (\"How many boats have been deployed?\")\n"
         "3. Shelter capacity status (\"Show evacuation risks\")\n"
         "4. Scenario simulations (\"What happens if rainfall increases by 30%?\")"
