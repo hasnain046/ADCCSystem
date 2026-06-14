@@ -303,6 +303,12 @@ export const apiService = {
     const { data } = await api.get<{ recommendations: string }>('/api/command-center/recommendations');
     return data.recommendations;
   },
+
+  // System Logs
+  getSystemLogs: async (lines: number = 100): Promise<string[]> => {
+    const { data } = await api.get<{ logs: string[] }>(`/api/system-logs?lines=${lines}`);
+    return data.logs;
+  },
 };
 
 export interface ChatMessage {

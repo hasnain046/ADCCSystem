@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import apiService, { 
   BackendSyncLog, 
@@ -34,18 +34,98 @@ interface AgentStatusDetails {
 export const Agents: React.FC = () => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>('a-collect');
   const [commandText, setCommandText] = useState<string>('');
-  
+  const [activeTab, setActiveTab] = useState<'agent' | 'system'>('agent');
+  const [logFilter, setLogFilter] = useState<string>('');
+  const [systemLogsFilter, setSystemLogsFilter] = useState<string>('ALL');
+
+  const logContainerRef = useRef<HTMLDivElement>(null);
+
   // 1. Fetch live backend streams
   const { data: syncLogs = [], refetch: refetchSync } = useQuery<BackendSyncLog[]>({ queryKey: ['syncLogs'], queryFn: apiService.getSyncLogs });
   const { data: verLogs = [], refetch: refetchVer } = useQuery<BackendVerificationLog[]>({ queryKey: ['verificationLogs'], queryFn: apiService.getVerificationLogs });
   const { data: allocations = [], refetch: refetchAlloc } = useQuery<BackendAllocation[]>({ queryKey: ['allocations'], queryFn: apiService.getAllocations });
   const { data: disasters = [], refetch: refetchDis } = useQuery<BackendDisaster[]>({ queryKey: ['disasters'], queryFn: apiService.getDisasters });
 
+  // Fetch live system execution logs
+  const { data: systemLogs = [], refetch: refetchSystem } = useQuery<string[]>({
+    queryKey: ['systemLogs'],
+    queryFn: () => apiService.getSystemLogs(100),
+    refetchInterval: activeTab === 'system' ? 2000 : false,
+  });
+
+  // Auto-scroll logs container to bottom when log updates or active tab changes
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [systemLogs, activeTab]);
+
   const handleRefresh = () => {
     refetchSync();
     refetchVer();
     refetchAlloc();
     refetchDis();
+    refetchSystem();
+  };
+
+  const getFilteredSystemLogs = () => {
+    return systemLogs.filter(log => {
+      // Level filter
+      if (systemLogsFilter !== 'ALL') {
+        const hasLevel = log.includes(` | ${systemLogsFilter} `) || 
+                         log.includes(` | ${systemLogsFilter}   `) || 
+                         log.includes(` | ${systemLogsFilter}    `) || 
+                         log.toLowerCase().includes(`${systemLogsFilter.toLowerCase()}:`);
+        if (!hasLevel) return false;
+      }
+      // Text search filter
+      if (logFilter.trim() !== '') {
+        return log.toLowerCase().includes(logFilter.toLowerCase());
+      }
+      return true;
+    });
+  };
+
+  const formatSystemLogLine = (line: string) => {
+    const parts = line.split(' | ');
+    if (parts.length >= 3) {
+      const timestamp = parts[0];
+      const level = parts[1].trim();
+      const rest = parts.slice(2).join(' | ');
+      
+      let levelColor = 'text-cyan-400';
+      if (level === 'SUCCESS') levelColor = 'text-emerald-400';
+      if (level === 'WARNING') levelColor = 'text-amber-400 font-bold';
+      if (level === 'ERROR' || level === 'CRITICAL') levelColor = 'text-rose-500 font-bold animate-pulse';
+      
+      const restParts = rest.split(' - ');
+      const moduleInfo = restParts[0];
+      const message = restParts.slice(1).join(' - ');
+
+      return (
+        <div className="flex flex-wrap gap-1 border-b border-gray-900/40 pb-1.5 mb-1.5 text-[10px]">
+          <span className="text-gray-500 font-mono text-[9px]">{timestamp}</span>
+          <span className="text-gray-600 font-mono text-[9px] px-1">|</span>
+          <span className={`font-mono text-[10px] uppercase font-bold tracking-wider ${levelColor}`}>{level}</span>
+          <span className="text-gray-600 font-mono text-[9px] px-1">|</span>
+          <span className="text-gray-400 font-mono text-[9px] truncate max-w-[125px]" title={moduleInfo}>{moduleInfo}</span>
+          <span className="text-gray-600 font-mono text-[9px] px-1">-</span>
+          <span className="text-adcc-textPrimary font-mono break-all">{message}</span>
+        </div>
+      );
+    }
+    
+    let textColor = 'text-gray-300';
+    if (line.includes('INFO:') || line.includes('INFO ')) textColor = 'text-cyan-300';
+    else if (line.includes('SUCCESS:') || line.includes('SUCCESS ')) textColor = 'text-emerald-300';
+    else if (line.includes('WARNING:') || line.includes('WARNING ')) textColor = 'text-amber-300';
+    else if (line.includes('ERROR:') || line.includes('ERROR ') || line.includes('CRITICAL:')) textColor = 'text-rose-400';
+    
+    return (
+      <div className={`border-b border-gray-900/40 pb-1.5 mb-1.5 font-mono text-[10px] ${textColor}`}>
+        {line}
+      </div>
+    );
   };
 
   // 2. Parse live agent details
@@ -325,39 +405,127 @@ export const Agents: React.FC = () => {
 
         {/* Selected Agent Terminal Logs */}
         <div className="glass-panel border border-gray-800 rounded-xl p-5 flex flex-col gap-4 bg-[#090E1A] h-fit">
-          <div className="border-b border-gray-850 pb-3">
+          <div className="border-b border-gray-850 pb-2 flex justify-between items-center">
             <h3 className="font-bold text-xs font-mono uppercase tracking-wider text-adcc-textPrimary flex items-center gap-1.5">
               <Terminal size={14} className="text-adcc-accent" />
-              Diagnostics Terminal Override
+              Diagnostics Terminal
             </h3>
-          </div>
-
-          <div className="flex flex-col gap-3 font-mono text-[11px] leading-relaxed">
-            <div className="flex flex-col bg-[#050811] p-3 rounded-lg border border-gray-850 min-h-[180px] max-h-[200px] overflow-y-auto text-adcc-success pr-1">
-              {selectedAgent.logs.map((log, idx) => (
-                <div key={idx} className="border-b border-gray-900/40 pb-1.5 mb-1.5">
-                  {log}
-                </div>
-              ))}
-            </div>
-
-            <form onSubmit={handleSendCommand} className="flex gap-2 mt-1">
-              <input
-                type="text"
-                value={commandText}
-                onChange={(e) => setCommandText(e.target.value)}
-                placeholder="operator@adcc:~$"
-                className="flex-1 bg-[#050811] border border-gray-850 text-adcc-textPrimary font-mono text-xs rounded-lg px-3 py-2 outline-none focus:border-adcc-accent"
-              />
-              <button
-                type="submit"
-                className="px-3 bg-adcc-accent text-adcc-bg border border-adcc-accent hover:shadow-glow rounded-lg flex items-center justify-center transition-all duration-200"
+            
+            <div className="flex gap-1.5 font-mono text-[10px]">
+              <button 
+                onClick={() => setActiveTab('agent')}
+                className={`px-2 py-0.5 border rounded transition-all duration-150 font-bold uppercase ${
+                  activeTab === 'agent' 
+                    ? 'border-adcc-accent bg-adcc-accent/15 text-adcc-accent shadow-glow' 
+                    : 'border-gray-850 hover:border-gray-700 text-adcc-textMuted'
+                }`}
               >
-                <Send size={12} />
+                Agent
               </button>
-            </form>
+              <button 
+                onClick={() => setActiveTab('system')}
+                className={`px-2 py-0.5 border rounded transition-all duration-150 font-bold uppercase ${
+                  activeTab === 'system' 
+                    ? 'border-adcc-accent bg-adcc-accent/15 text-adcc-accent shadow-glow' 
+                    : 'border-gray-850 hover:border-gray-700 text-adcc-textMuted'
+                }`}
+              >
+                System
+              </button>
+            </div>
           </div>
-        </div>
+
+          {activeTab === 'agent' ? (
+            <div className="flex flex-col gap-3 font-mono text-[11px] leading-relaxed">
+              <div className="flex justify-between items-center text-[10px] text-adcc-textMuted">
+                <span>ACTIVE: <span className="text-adcc-accent font-bold">{selectedAgent.name.toUpperCase()}</span></span>
+                <span>STATUS: <span className="text-adcc-success">{selectedAgent.status}</span></span>
+              </div>
+              
+              <div 
+                ref={logContainerRef}
+                className="flex flex-col bg-[#050811] p-3 rounded-lg border border-gray-850 min-h-[220px] max-h-[280px] overflow-y-auto text-adcc-success pr-1"
+              >
+                {selectedAgent.logs.map((log, idx) => (
+                  <div key={idx} className="border-b border-gray-900/40 pb-1.5 mb-1.5">
+                    {log}
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={handleSendCommand} className="flex gap-2 mt-1">
+                <input
+                  type="text"
+                  value={commandText}
+                  onChange={(e) => setCommandText(e.target.value)}
+                  placeholder={`operator@adcc:${selectedAgentId.replace('a-', '')}~$`}
+                  className="flex-1 bg-[#050811] border border-gray-850 text-adcc-textPrimary font-mono text-xs rounded-lg px-3 py-2 outline-none focus:border-adcc-accent"
+                />
+                <button
+                  type="submit"
+                  className="px-3 bg-adcc-accent text-adcc-bg border border-adcc-accent hover:shadow-glow rounded-lg flex items-center justify-center transition-all duration-200"
+                >
+                  <Send size={12} />
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 font-mono text-[11px] leading-relaxed">
+              <div className="flex gap-2 justify-between items-center">
+                <input
+                  type="text"
+                  placeholder="Filter by keyword..."
+                  value={logFilter}
+                  onChange={(e) => setLogFilter(e.target.value)}
+                  className="bg-[#050811] border border-gray-850 text-adcc-textPrimary text-[10px] rounded-lg px-2.5 py-1.5 outline-none w-32 focus:border-adcc-accent"
+                />
+                
+                <div className="flex gap-1">
+                  {['ALL', 'INFO', 'SUCCESS', 'WARNING', 'ERROR'].map(lvl => (
+                    <button
+                      key={lvl}
+                      onClick={() => setSystemLogsFilter(lvl)}
+                      className={`px-1.5 py-0.5 border text-[8px] font-bold rounded transition-colors duration-150 ${
+                        systemLogsFilter === lvl
+                          ? lvl === 'ERROR' ? 'border-rose-500 bg-rose-500/20 text-rose-400' :
+                            lvl === 'WARNING' ? 'border-amber-500 bg-amber-500/20 text-amber-400' :
+                            lvl === 'SUCCESS' ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400' :
+                            'border-adcc-accent bg-adcc-accent/20 text-adcc-accent'
+                          : 'border-gray-850 hover:border-gray-800 text-adcc-textMuted'
+                      }`}
+                    >
+                      {lvl === 'SUCCESS' ? 'OK' : lvl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div 
+                ref={logContainerRef}
+                className="flex flex-col bg-[#050811] p-3 rounded-lg border border-gray-850 min-h-[220px] max-h-[280px] overflow-y-auto pr-1"
+              >
+                {getFilteredSystemLogs().length === 0 ? (
+                  <div className="text-adcc-textMuted text-center py-12 text-[10px]">
+                    NO MATCHING SYSTEM LOGS FOUND
+                  </div>
+                ) : (
+                  getFilteredSystemLogs().map((log, idx) => (
+                    <div key={idx}>
+                      {formatSystemLogLine(log)}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex justify-between items-center text-[9px] text-adcc-textMuted font-mono">
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  POLLED REAL-TIME FEED
+                </span>
+                <span>SHOWING {getFilteredSystemLogs().length} OF {systemLogs.length} LINES</span>
+              </div>
+            </div>
+          )}
 
       </div>
     </PageContainer>

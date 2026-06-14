@@ -65,6 +65,15 @@ from database.models import (
 )
 from database.postgres import get_db, test_connection
 
+# Configure logger to log to file (to avoid duplicate handlers when reloaded, we set a flag)
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE_PATH = os.path.join(BASE_DIR, "data", "adcc_system.log")
+
+if not hasattr(logger, "_adcc_file_added"):
+    logger.add(LOG_FILE_PATH, rotation="10 MB", retention="5 days", level="INFO")
+    logger._adcc_file_added = True
+
 # ===========================================================================
 # APP INITIALIZATION
 # ===========================================================================
@@ -1453,6 +1462,28 @@ def run_demo_scenario(payload: DemoRunPayload, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"❌ Error during demo orchestration execution: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/system-logs", tags=["System"])
+def get_system_logs(lines: int = Query(100, ge=1, le=1000)):
+    """
+    Returns the last N lines of the system execution log file.
+    """
+    import os
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(BASE_DIR, "data", "adcc_system.log")
+    
+    if not os.path.exists(log_file):
+        return {"logs": []}
+        
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+            from collections import deque
+            last_lines = deque(f, maxlen=lines)
+            return {"logs": [line.rstrip() for line in last_lines]}
+    except Exception as e:
+        logger.error(f"Error reading system logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not read logs: {str(e)}")
 
 
 @app.get("/", tags=["System"])
