@@ -314,14 +314,14 @@ export const Agents: React.FC = () => {
         </div>
 
         {/* Graph node sequence representation */}
-        <div className="flex flex-col xl:flex-row items-center justify-between gap-3 p-4 bg-adcc-secondary/25 border border-gray-850 rounded-xl">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-3 p-4 bg-adcc-secondary/25 border border-gray-850 rounded-xl">
           {agents.map((agent, index) => {
             const isSelected = selectedAgentId === agent.id;
             return (
               <React.Fragment key={agent.id}>
                 <button
                   onClick={() => setSelectedAgentId(agent.id)}
-                  className={`flex flex-col gap-1.5 p-3.5 min-w-[190px] w-full xl:w-auto glass-panel border rounded-lg text-left transition-all duration-200 cursor-pointer font-mono text-xs ${
+                  className={`flex flex-col gap-1.5 p-3.5 min-w-[190px] w-full lg:w-auto glass-panel border rounded-lg text-left transition-all duration-200 cursor-pointer font-mono text-xs ${
                     isSelected ? 'ring-2 ring-adcc-accent border-adcc-accent/40 shadow-glow bg-adcc-accent/5' : 'border-gray-850 hover:border-gray-800 bg-adcc-secondary/20'
                   }`}
                 >
@@ -337,7 +337,7 @@ export const Agents: React.FC = () => {
                   </div>
                 </button>
                 {index < agents.length - 1 && (
-                  <ChevronRight size={16} className="hidden xl:block text-adcc-accent/30 animate-pulse" />
+                  <ChevronRight size={16} className="hidden lg:block text-adcc-accent/30 animate-pulse" />
                 )}
               </React.Fragment>
             );
@@ -346,10 +346,10 @@ export const Agents: React.FC = () => {
       </div>
 
       {/* Main Layout Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Agent Status Board Table */}
-        <div className="xl:col-span-2 glass-panel border border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+        <div className="lg:col-span-2 glass-panel border border-gray-800 rounded-xl p-5 flex flex-col gap-4">
           <div className="border-b border-gray-850 pb-3">
             <h3 className="font-bold text-xs font-mono uppercase tracking-wider text-adcc-textPrimary flex items-center gap-1.5">
               <Activity size={14} className="text-adcc-accent" />
